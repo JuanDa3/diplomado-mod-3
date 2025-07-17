@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  persistencia:
+    image: mysql:oraclelinux9
+    container_name: persistencia
+    environment:
+      - MYSQL_ROOT_PASSWORD=persistencia-12345
+      - MYSQL_DATABASE=persistencia
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=persistencia-12345
+    ports:
+      - 3306:3306
+    volumes:
+      - persistencia_data:/var/lib/mysql
+      - ./persistencia.sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - persistencia_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Backend API Service
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend-api
+    environment:
+      - DB_HOST=persistencia
+      - DB_PORT=3306
+      - DB_NAME=persistencia
+      - DB_USER=user
+      - DB_PASSWORD=persistencia-12345
+      - NODE_ENV=production
+    ports:
+      - 3000:3000
+    depends_on:
+      persistencia:
+        condition: service_healthy
+    networks:
+      - persistencia_network
+    restart: unless-stopped
+
+  # Angular Frontend
+  angular-frontend:
+    build:
+      context: ./angular-front
+      dockerfile: Dockerfile
+    container_name: angular-frontend
+    #ports:
+    #  - 80:80
+    depends_on:
+      - backend-api
+    networks:
+      - persistencia_network
+    restart: unless-stopped
+    environment:
+      - API_URL=http://backend-api:3000
+
+  firewall:
+    build:
+      context: ./firewall
+      dockerfile: Dockerfile
+    container_name: firewall
+    ports:
+    - "80:80"
+    cap_add:
+    - NET_ADMIN
+    privileged: true
+    depends_on:
+      - angular-frontend
+      - backend-api
+    networks:
+      - persistencia_network
+
+volumes:
+  persistencia_data:
+  
+
+networks:
+  persistencia_network:
+    driver: bridge

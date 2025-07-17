@@ -1,0 +1,121 @@
+<div class="key-pair-container">
+  <div class="header">
+    <h1>🔐 Key Pair Generator</h1>
+    <p>Generate and download RSA key pairs for secure communications</p>
+  </div>
+
+  <!-- Key Generation Form -->
+  <div class="form-section">
+    <h2>Generate New Key Pair</h2>
+    
+    <div class="form-group">
+      <label for="keyName">Key Name:</label>
+      <input 
+        type="text" 
+        id="keyName" 
+        [(ngModel)]="keyName" 
+        placeholder="Enter a name for your key pair (e.g., my-server-key)"
+        class="form-control"
+        [disabled]="isGenerating"
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="keySize">Key Size:</label>
+      <select 
+        id="keySize" 
+        [(ngModel)]="keySize" 
+        class="form-control"
+        [disabled]="isGenerating"
+      >
+        <option value="1024">1024 bits</option>
+        <option value="2048">2048 bits (Recommended)</option>
+        <option value="4096">4096 bits</option>
+      </select>
+    </div>
+
+    <div class="button-group">
+      <button 
+        (click)="generateKeyPair()" 
+        [disabled]="isGenerating || !keyName.trim()"
+        class="btn btn-primary"
+      >
+        <span *ngIf="!isGenerating">🔑 Generate Key Pair</span>
+        <span *ngIf="isGenerating">⏳ Generating...</span>
+      </button>
+      
+      <button 
+        (click)="reset()" 
+        [disabled]="isGenerating"
+        class="btn btn-secondary"
+      >
+        🔄 Reset
+      </button>
+    </div>
+
+    <!-- Error Message -->
+    <div *ngIf="errorMessage" class="error-message">
+      ❌ {{ errorMessage }}
+    </div>
+  </div>
+
+  <!-- Generated Keys Section -->
+  <div *ngIf="isGenerated" class="keys-section">
+    <h2>Generated Keys</h2>
+    
+    <!-- Public Key -->
+    <div class="key-display">
+      <div class="key-header">
+        <h3>🔓 Public Key</h3>
+        <div class="key-actions">
+          <button 
+            (click)="copyToClipboard(publicKey, 'Public key')" 
+            class="btn btn-small btn-outline"
+            title="Copy to clipboard"
+          >
+            📋 Copy
+          </button>
+          <button 
+            (click)="downloadPublicKey()" 
+            class="btn btn-small btn-success"
+            title="Download public key"
+          >
+            💾 Download
+          </button>
+        </div>
+      </div>
+      <div class="key-content">
+        <pre>{{ publicKey }}</pre>
+      </div>
+    </div>
+
+    <!-- Private Key -->
+    <div class="key-display private-key">
+      <div class="key-header">
+        <h3>🔒 Private Key</h3>
+        <div class="key-actions">
+          <button 
+            (click)="copyToClipboard(privateKey, 'Private key')" 
+            class="btn btn-small btn-outline"
+            title="Copy to clipboard"
+          >
+            📋 Copy
+          </button>
+          <button 
+            (click)="downloadPrivateKey()" 
+            class="btn btn-small btn-warning"
+            title="Download private key"
+          >
+            💾 Download
+          </button>
+        </div>
+      </div>
+      <div class="key-content">
+        <pre>{{ privateKey }}</pre>
+      </div>
+      <div class="security-warning">
+        ⚠️ <strong>Security Warning:</strong> Keep your private key secure and never share it with anyone!
+      </div>
+    </div>
+  </div>
+</div> 
