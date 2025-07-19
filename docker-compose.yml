@@ -10,8 +10,8 @@ services:
       - MYSQL_DATABASE=persistencia
       - MYSQL_USER=user
       - MYSQL_PASSWORD=persistencia-12345
-    ports:
-      - 3306:3306
+    #ports:
+    #  - 3306:3306
     volumes:
       - persistencia_data:/var/lib/mysql
       - ./persistencia.sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -35,8 +35,8 @@ services:
       - DB_USER=user
       - DB_PASSWORD=persistencia-12345
       - NODE_ENV=production
-    ports:
-      - 3000:3000
+    #ports:
+    #  - 3000:3000
     depends_on:
       persistencia:
         condition: service_healthy
@@ -58,7 +58,7 @@ services:
       - persistencia_network
     restart: unless-stopped
     environment:
-      - API_URL=http://backend-api:3000
+      - API_URL=http://localhost/api
 
   firewall:
     build:

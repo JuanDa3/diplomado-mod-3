@@ -22,7 +22,7 @@ export class KeyPairGeneratorComponent {
   isLoadingKeys: boolean = false;
 
   // API base URL - will be replaced with environment variable in production
-  private apiUrl = 'http://localhost:3000/api';
+  private apiUrl = '/api';
 
   constructor(private http: HttpClient) {
     this.loadSavedKeys();
