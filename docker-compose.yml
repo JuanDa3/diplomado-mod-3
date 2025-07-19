@@ -10,8 +10,9 @@ services:
       - MYSQL_DATABASE=persistencia
       - MYSQL_USER=user
       - MYSQL_PASSWORD=persistencia-12345
-    #ports:
-    #  - 3306:3306
+    # No exponer puerto al exterior para mayor seguridad
+    # ports:
+    #   - 3306:3306
     volumes:
       - persistencia_data:/var/lib/mysql
       - ./persistencia.sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -35,8 +36,9 @@ services:
       - DB_USER=user
       - DB_PASSWORD=persistencia-12345
       - NODE_ENV=production
-    #ports:
-    #  - 3000:3000
+    # No exponer puerto al exterior - solo acceso interno
+    # ports:
+    #   - 3000:3000
     depends_on:
       persistencia:
         condition: service_healthy
@@ -50,35 +52,40 @@ services:
       context: ./angular-front
       dockerfile: Dockerfile
     container_name: angular-frontend
-    #ports:
-    #  - 80:80
+    # No exponer puerto al exterior - solo acceso interno
+    # ports:
+    #   - 80:80
     depends_on:
       - backend-api
     networks:
       - persistencia_network
     restart: unless-stopped
     environment:
-      - API_URL=http://localhost/api
+      # Angular usa HTTPS para llamadas API
+      - API_URL=https://localhost/api
 
+  # Firewall con HTTPS
   firewall:
     build:
       context: ./firewall
       dockerfile: Dockerfile
     container_name: firewall
     ports:
-    - "80:80"
+      # Exponer HTTP (redirect) y HTTPS
+      - "80:80"   # HTTP redirect a HTTPS
+      - "443:443" # HTTPS principal
     cap_add:
-    - NET_ADMIN
+      - NET_ADMIN
     privileged: true
     depends_on:
       - angular-frontend
       - backend-api
     networks:
       - persistencia_network
+    restart: unless-stopped
 
 volumes:
   persistencia_data:
-  
 
 networks:
   persistencia_network:
