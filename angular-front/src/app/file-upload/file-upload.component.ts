@@ -9,6 +9,7 @@ export interface UserFile {
   storedName: string;
   fileSize: number;
   mimeType: string;
+  fileHash: string;
   createdAt: string;
 }
 
@@ -146,6 +147,26 @@ export class FileUploadComponent implements OnInit {
       error: (error) => {
         this.errorMessage = 'Failed to download file';
         console.error('Download error:', error);
+      }
+    });
+  }
+
+  verifyFileIntegrity(file: UserFile): void {
+    const headers = this.authService.getAuthHeaders();
+    
+    this.http.post(`${this.apiUrl}/files/${file.id}/verify`, {}, { headers }).subscribe({
+      next: (response: any) => {
+        if (response.success) {
+          if (response.integrity) {
+            alert(`✅ ${response.message}\n\nStored Hash: ${response.storedHash}\nCurrent Hash: ${response.currentHash}`);
+          } else {
+            alert(`❌ ${response.message}\n\nStored Hash: ${response.storedHash}\nCurrent Hash: ${response.currentHash}`);
+          }
+        }
+      },
+      error: (error) => {
+        this.errorMessage = 'Failed to verify file integrity';
+        console.error('Verification error:', error);
       }
     });
   }

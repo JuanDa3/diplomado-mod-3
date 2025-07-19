@@ -288,6 +288,16 @@
   background: white;
 }
 
+.verify-button {
+  color: #28a745;
+  border-color: #28a745;
+}
+
+.verify-button:hover {
+  background: #28a745;
+  color: white;
+}
+
 .download-button {
   color: #007bff;
   border-color: #007bff;

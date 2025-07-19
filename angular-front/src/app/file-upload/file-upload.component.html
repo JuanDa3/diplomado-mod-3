@@ -91,6 +91,18 @@
           
           <div class="file-actions">
             <button 
+              (click)="verifyFileIntegrity(file)" 
+              class="action-button verify-button"
+              title="Verify file integrity"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12l2 2 4-4"></path>
+                <circle cx="12" cy="12" r="10"></circle>
+              </svg>
+              Verify
+            </button>
+            
+            <button 
               (click)="downloadFile(file)" 
               class="action-button download-button"
               title="Download file"

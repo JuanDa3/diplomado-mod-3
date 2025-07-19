@@ -479,12 +479,16 @@ app.post('/api/files/upload', authenticateToken, upload.single('file'), async (r
       });
     }
 
-    const { originalname, filename, size, mimetype } = req.file;
+    const { originalname, filename, size, mimetype, path: filePath } = req.file;
+    
+    // Calculate file hash (SHA-256)
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
     
     // Save file metadata to database
     const [result] = await pool.execute(
-      'INSERT INTO user_files (original_name, stored_name, file_size, mime_type, user_id) VALUES (?, ?, ?, ?, ?)',
-      [originalname, filename, size, mimetype, req.user.userId]
+      'INSERT INTO user_files (original_name, stored_name, file_size, mime_type, file_hash, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [originalname, filename, size, mimetype, fileHash, req.user.userId]
     );
     
     // Get the created file record
@@ -501,6 +505,7 @@ app.post('/api/files/upload', authenticateToken, upload.single('file'), async (r
         storedName: files[0].stored_name,
         fileSize: files[0].file_size,
         mimeType: files[0].mime_type,
+        fileHash: files[0].file_hash,
         createdAt: files[0].created_at
       }
     });
@@ -518,7 +523,7 @@ app.post('/api/files/upload', authenticateToken, upload.single('file'), async (r
 app.get('/api/files', authenticateToken, async (req, res) => {
   try {
     const [files] = await pool.execute(
-      'SELECT id, original_name, stored_name, file_size, mime_type, created_at FROM user_files WHERE user_id = ? ORDER BY created_at DESC',
+      'SELECT id, original_name, stored_name, file_size, mime_type, file_hash, created_at FROM user_files WHERE user_id = ? ORDER BY created_at DESC',
       [req.user.userId]
     );
     
@@ -530,6 +535,7 @@ app.get('/api/files', authenticateToken, async (req, res) => {
         storedName: file.stored_name,
         fileSize: file.file_size,
         mimeType: file.mime_type,
+        fileHash: file.file_hash,
         createdAt: file.created_at
       }))
     });
@@ -581,6 +587,58 @@ app.get('/api/files/:fileId/download', authenticateToken, async (req, res) => {
     console.error('Error downloading file:', error);
     res.status(500).json({ 
       error: 'Failed to download file',
+      details: error.message 
+    });
+  }
+});
+
+// Verify file integrity
+app.post('/api/files/:fileId/verify', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    
+    // Get file metadata
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    const file = files[0];
+    const filePath = path.join(uploadsDir, file.stored_name);
+    
+    // Check if file exists on disk
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ 
+        error: 'File not found on disk',
+        integrity: false
+      });
+    }
+    
+    // Calculate current file hash
+    const fileBuffer = fs.readFileSync(filePath);
+    const currentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    
+    // Compare with stored hash
+    const isIntegrityValid = currentHash === file.file_hash;
+    
+    res.json({
+      success: true,
+      integrity: isIntegrityValid,
+      storedHash: file.file_hash,
+      currentHash: currentHash,
+      message: isIntegrityValid ? 'File integrity verified' : 'File integrity check failed'
+    });
+    
+  } catch (error) {
+    console.error('Error verifying file integrity:', error);
+    res.status(500).json({ 
+      error: 'Failed to verify file integrity',
       details: error.message 
     });
   }
