@@ -1,0 +1,21 @@
+<header class="header">
+  <div class="header-content">
+    <div class="logo">
+      <h2>Key Pair Generator</h2>
+    </div>
+    
+    <div class="user-section" *ngIf="getCurrentUser()">
+      <div class="user-info">
+        <span class="user-email">{{ getCurrentUser()?.email }}</span>
+      </div>
+      <button class="logout-button" (click)="logout()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+          <polyline points="16,17 21,12 16,7"></polyline>
+          <line x1="21" y1="12" x2="9" y2="12"></line>
+        </svg>
+        Logout
+      </button>
+    </div>
+  </div>
+</header> 

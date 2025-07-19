@@ -1,0 +1,34 @@
+/* Global styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f8f9fa;
+}
+
+.main-content {
+  min-height: calc(100vh - 64px);
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* When not authenticated (login page), remove padding and max-width */
+.main-content:has(router-outlet:only-child) {
+  padding: 0;
+  max-width: none;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .main-content {
+    padding: 16px;
+  }
+}
