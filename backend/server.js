@@ -644,6 +644,268 @@ app.post('/api/files/:fileId/verify', authenticateToken, async (req, res) => {
   }
 });
 
+// Get files available for signing (only user's own files)
+app.get('/api/files/available-for-signing', authenticateToken, async (req, res) => {
+  try {
+    const [files] = await pool.execute(`
+      SELECT 
+        uf.id, 
+        uf.original_name, 
+        uf.file_size, 
+        uf.mime_type, 
+        uf.file_hash,
+        uf.created_at,
+        u.name as owner_name,
+        u.email as owner_email,
+        CASE WHEN fs.id IS NOT NULL THEN true ELSE false END as is_signed_by_user
+      FROM user_files uf
+      JOIN users u ON uf.user_id = u.id
+      LEFT JOIN file_signatures fs ON uf.id = fs.file_id AND fs.signer_id = ?
+      WHERE uf.user_id = ?
+      ORDER BY uf.created_at DESC
+    `, [req.user.userId, req.user.userId]);
+    
+    res.json({
+      success: true,
+      files: files.map(file => ({
+        id: file.id,
+        originalName: file.original_name,
+        fileSize: file.file_size,
+        mimeType: file.mime_type,
+        fileHash: file.file_hash,
+        createdAt: file.created_at,
+        ownerName: file.owner_name,
+        ownerEmail: file.owner_email,
+        isSignedByUser: file.is_signed_by_user
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching files for signing:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch files for signing',
+      details: error.message 
+    });
+  }
+});
+
+// Sign a file with private key
+app.post('/api/files/:fileId/sign', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { privateKey } = req.body;
+    
+    if (!privateKey) {
+      return res.status(400).json({ 
+        error: 'Private key is required' 
+      });
+    }
+    
+    // Get file metadata
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ?',
+      [fileId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    const file = files[0];
+    
+    // Check if user already signed this file
+    const [existingSignatures] = await pool.execute(
+      'SELECT id FROM file_signatures WHERE file_id = ? AND signer_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (existingSignatures.length > 0) {
+      return res.status(409).json({ 
+        error: 'File already signed by this user' 
+      });
+    }
+    
+    // Verify private key format and create signature
+    try {
+      // Create signature using the file hash and private key
+      const sign = crypto.createSign('SHA256');
+      sign.update(file.file_hash);
+      sign.end();
+      
+      const signature = sign.sign(privateKey, 'base64');
+      const signatureHash = crypto.createHash('sha256').update(signature).digest('hex');
+      
+      // Save signature to database
+      const [result] = await pool.execute(
+        'INSERT INTO file_signatures (file_id, signer_id, signature_data, signature_hash) VALUES (?, ?, ?, ?)',
+        [fileId, req.user.userId, signature, signatureHash]
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: 'File signed successfully',
+        signature: {
+          id: result.insertId,
+          signatureHash: signatureHash,
+          signedAt: new Date().toISOString()
+        }
+      });
+      
+    } catch (signError) {
+      return res.status(400).json({ 
+        error: 'Invalid private key or signing failed',
+        details: signError.message 
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error signing file:', error);
+    res.status(500).json({ 
+      error: 'Failed to sign file',
+      details: error.message 
+    });
+  }
+});
+
+// Verify file signature
+app.post('/api/files/:fileId/verify-signature', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { signerId } = req.body;
+    
+    // Get file metadata
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ?',
+      [fileId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    const file = files[0];
+    
+    // Get signature
+    const [signatures] = await pool.execute(
+      'SELECT * FROM file_signatures WHERE file_id = ? AND signer_id = ?',
+      [fileId, signerId]
+    );
+    
+    if (signatures.length === 0) {
+      return res.status(404).json({ 
+        error: 'Signature not found for this user' 
+      });
+    }
+    
+    const signature = signatures[0];
+    
+    // Get signer's public key (assuming it's stored in public_keys table)
+    const [publicKeys] = await pool.execute(
+      'SELECT public_key FROM public_keys WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+      [signerId]
+    );
+    
+    if (publicKeys.length === 0) {
+      return res.status(404).json({ 
+        error: 'Public key not found for signer' 
+      });
+    }
+    
+    const publicKey = publicKeys[0].public_key;
+    
+    // Verify signature
+    try {
+      const verify = crypto.createVerify('SHA256');
+      verify.update(file.file_hash);
+      verify.end();
+      
+      const isValid = verify.verify(publicKey, signature.signature_data, 'base64');
+      
+      res.json({
+        success: true,
+        isValid: isValid,
+        signature: {
+          id: signature.id,
+          signatureHash: signature.signature_hash,
+          signedAt: signature.signed_at,
+          signerId: signature.signer_id
+        },
+        message: isValid ? 'Signature is valid' : 'Signature is invalid'
+      });
+      
+    } catch (verifyError) {
+      res.status(400).json({ 
+        error: 'Signature verification failed',
+        details: verifyError.message 
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error verifying signature:', error);
+    res.status(500).json({ 
+      error: 'Failed to verify signature',
+      details: error.message 
+    });
+  }
+});
+
+// Get file signatures
+app.get('/api/files/:fileId/signatures', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    
+    // Get file metadata
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ?',
+      [fileId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    // Get all signatures for this file
+    const [signatures] = await pool.execute(`
+      SELECT 
+        fs.id,
+        fs.signature_hash,
+        fs.signed_at,
+        u.name as signer_name,
+        u.email as signer_email,
+        fs.signer_id
+      FROM file_signatures fs
+      JOIN users u ON fs.signer_id = u.id
+      WHERE fs.file_id = ?
+      ORDER BY fs.signed_at DESC
+    `, [fileId]);
+    
+    res.json({
+      success: true,
+      signatures: signatures.map(sig => ({
+        id: sig.id,
+        signatureHash: sig.signature_hash,
+        signedAt: sig.signed_at,
+        signerName: sig.signer_name,
+        signerEmail: sig.signer_email,
+        signerId: sig.signer_id
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching signatures:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch signatures',
+      details: error.message 
+    });
+  }
+});
+
 // Delete file
 app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
   try {

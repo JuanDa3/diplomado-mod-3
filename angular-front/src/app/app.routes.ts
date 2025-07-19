@@ -4,6 +4,7 @@ import { LoginComponent } from './login/login.component';
 import { SignupComponent } from './signup/signup.component';
 import { UsersComponent } from './users/users.component';
 import { FileUploadComponent } from './file-upload/file-upload.component';
+import { FileSigningComponent } from './file-signing/file-signing.component';
 import { authGuard } from './auth/auth.guard';
 
 export const routes: Routes = [
@@ -13,5 +14,6 @@ export const routes: Routes = [
   { path: 'key-generator', component: KeyPairGeneratorComponent, canActivate: [authGuard] },
   { path: 'users', component: UsersComponent, canActivate: [authGuard] },
   { path: 'files', component: FileUploadComponent, canActivate: [authGuard] },
+  { path: 'signing', component: FileSigningComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: '' }
 ];

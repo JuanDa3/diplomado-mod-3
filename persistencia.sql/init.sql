@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS user_files (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabla para firmas digitales de archivos
+CREATE TABLE IF NOT EXISTS file_signatures (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    file_id INT NOT NULL,
+    signer_id INT NOT NULL,
+    signature_data TEXT NOT NULL,
+    signature_hash VARCHAR(64) NOT NULL,
+    signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (file_id) REFERENCES user_files(id) ON DELETE CASCADE,
+    FOREIGN KEY (signer_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_file_signer (file_id, signer_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Tabla de ejemplo para logs
 CREATE TABLE IF NOT EXISTS logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
