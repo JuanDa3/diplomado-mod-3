@@ -3,14 +3,33 @@
 
 USE persistencia;
 
--- Tabla de ejemplo para usuarios
+-- Drop existing tables if they exist (to ensure clean schema)
+DROP TABLE IF EXISTS public_keys;
+DROP TABLE IF EXISTS users;
+
+-- Tabla de usuarios con autenticación
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabla para claves públicas
+CREATE TABLE IF NOT EXISTS public_keys (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    key_name VARCHAR(255) NOT NULL,
+    public_key TEXT NOT NULL,
+    key_size INT NOT NULL,
+    user_id INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_key_name (key_name),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Tabla de ejemplo para logs
 CREATE TABLE IF NOT EXISTS logs (
@@ -20,15 +39,12 @@ CREATE TABLE IF NOT EXISTS logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insertar algunos datos de ejemplo
-INSERT INTO users (username, email) VALUES 
-    ('admin', 'admin@example.com'),
-    ('user1', 'user1@example.com')
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
-
+-- Insertar algunos datos de ejemplo (sin contraseñas hasheadas por seguridad)
+-- En producción, las contraseñas deben ser hasheadas con bcrypt
 INSERT INTO logs (message, level) VALUES 
     ('Base de datos inicializada correctamente', 'INFO'),
-    ('Sistema listo para operaciones', 'INFO');
+    ('Sistema de autenticación configurado', 'INFO'),
+    ('Tabla de usuarios creada', 'INFO');
 
 -- Mostrar las tablas creadas
 SHOW TABLES; 

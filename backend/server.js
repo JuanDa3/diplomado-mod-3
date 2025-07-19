@@ -3,9 +3,12 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const helmet = require('helmet');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Middleware
 app.use(helmet());
@@ -46,25 +49,60 @@ async function initializeDatabase() {
 
 async function createTables() {
   try {
-    const createTableSQL = `
+    // Create users table
+    const createUsersTableSQL = `
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_email (email)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    
+    // Create public_keys table
+    const createKeysTableSQL = `
       CREATE TABLE IF NOT EXISTS public_keys (
         id INT AUTO_INCREMENT PRIMARY KEY,
         key_name VARCHAR(255) NOT NULL,
         public_key TEXT NOT NULL,
         key_size INT NOT NULL,
+        user_id INT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_key_name (key_name)
+        UNIQUE KEY unique_key_name (key_name),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     
-    await pool.execute(createTableSQL);
+    await pool.execute(createUsersTableSQL);
+    await pool.execute(createKeysTableSQL);
     console.log('✅ Database tables created/verified');
     
   } catch (error) {
     console.error('❌ Error creating tables:', error.message);
     throw error;
   }
+}
+
+// Authentication middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
 }
 
 // API Routes
@@ -78,8 +116,200 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Generate key pair endpoint
-app.post('/api/generate-key-pair', async (req, res) => {
+// User registration
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        error: 'Name, email, and password are required' 
+      });
+    }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ 
+        error: 'Password must be at least 6 characters long' 
+      });
+    }
+    
+    // Check if user already exists
+    const [existingUsers] = await pool.execute(
+      'SELECT id FROM users WHERE email = ?',
+      [email]
+    );
+    
+    if (existingUsers.length > 0) {
+      return res.status(409).json({ 
+        error: 'User with this email already exists' 
+      });
+    }
+    
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Create user
+    const [result] = await pool.execute(
+      'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
+      [name, email, hashedPassword]
+    );
+    
+    // Get created user (without password)
+    const [users] = await pool.execute(
+      'SELECT id, name, email, created_at FROM users WHERE id = ?',
+      [result.insertId]
+    );
+    
+    const user = users[0];
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, name: user.name },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.status(201).json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.created_at
+      },
+      token
+    });
+    
+  } catch (error) {
+    console.error('Error registering user:', error);
+    res.status(500).json({ 
+      error: 'Failed to register user',
+      details: error.message 
+    });
+  }
+});
+
+// User login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ 
+        error: 'Email and password are required' 
+      });
+    }
+    
+    // Find user by email
+    const [users] = await pool.execute(
+      'SELECT id, name, email, password FROM users WHERE email = ?',
+      [email]
+    );
+    
+    if (users.length === 0) {
+      return res.status(401).json({ 
+        error: 'Invalid email or password' 
+      });
+    }
+    
+    const user = users[0];
+    
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ 
+        error: 'Invalid email or password' 
+      });
+    }
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, name: user.name },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      },
+      token
+    });
+    
+  } catch (error) {
+    console.error('Error logging in:', error);
+    res.status(500).json({ 
+      error: 'Failed to login',
+      details: error.message 
+    });
+  }
+});
+
+// Get current user profile
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const [users] = await pool.execute(
+      'SELECT id, name, email, created_at FROM users WHERE id = ?',
+      [req.user.userId]
+    );
+    
+    if (users.length === 0) {
+      return res.status(404).json({ 
+        error: 'User not found' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      user: {
+        id: users[0].id,
+        name: users[0].name,
+        email: users[0].email,
+        createdAt: users[0].created_at
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch user profile',
+      details: error.message 
+    });
+  }
+});
+
+// Get all users (admin only - for now, all authenticated users can access)
+app.get('/api/users', authenticateToken, async (req, res) => {
+  try {
+    const [users] = await pool.execute(
+      'SELECT id, name, email, created_at FROM users ORDER BY created_at DESC'
+    );
+    
+    res.json({
+      success: true,
+      users: users.map(user => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.created_at
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch users',
+      details: error.message 
+    });
+  }
+});
+
+// Generate key pair endpoint (updated to include user_id)
+app.post('/api/generate-key-pair', authenticateToken, async (req, res) => {
   try {
     const { keyName, keySize = 2048 } = req.body;
     
@@ -92,8 +322,8 @@ app.post('/api/generate-key-pair', async (req, res) => {
     // Generate RSA key pair
     const { publicKey, privateKey } = generateRSAKeyPair(keySize);
     
-    // Save public key to database
-    const savedKey = await savePublicKey(keyName, publicKey, keySize);
+    // Save public key to database with user_id
+    const savedKey = await savePublicKey(keyName, publicKey, keySize, req.user.userId);
     
     res.json({
       success: true,
@@ -113,11 +343,12 @@ app.post('/api/generate-key-pair', async (req, res) => {
   }
 });
 
-// Get all public keys
-app.get('/api/public-keys', async (req, res) => {
+// Get all public keys (updated to filter by user)
+app.get('/api/public-keys', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      'SELECT id, key_name, public_key, key_size, created_at FROM public_keys ORDER BY created_at DESC'
+      'SELECT id, key_name, public_key, key_size, created_at FROM public_keys WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.userId]
     );
     
     res.json({
@@ -134,14 +365,14 @@ app.get('/api/public-keys', async (req, res) => {
   }
 });
 
-// Get public key by name
-app.get('/api/public-keys/:keyName', async (req, res) => {
+// Get public key by name (updated to filter by user)
+app.get('/api/public-keys/:keyName', authenticateToken, async (req, res) => {
   try {
     const { keyName } = req.params;
     
     const [rows] = await pool.execute(
-      'SELECT id, key_name, public_key, key_size, created_at FROM public_keys WHERE key_name = ?',
-      [keyName]
+      'SELECT id, key_name, public_key, key_size, created_at FROM public_keys WHERE key_name = ? AND user_id = ?',
+      [keyName, req.user.userId]
     );
     
     if (rows.length === 0) {
@@ -164,14 +395,14 @@ app.get('/api/public-keys/:keyName', async (req, res) => {
   }
 });
 
-// Delete public key
-app.delete('/api/public-keys/:keyName', async (req, res) => {
+// Delete public key (updated to filter by user)
+app.delete('/api/public-keys/:keyName', authenticateToken, async (req, res) => {
   try {
     const { keyName } = req.params;
     
     const [result] = await pool.execute(
-      'DELETE FROM public_keys WHERE key_name = ?',
-      [keyName]
+      'DELETE FROM public_keys WHERE key_name = ? AND user_id = ?',
+      [keyName, req.user.userId]
     );
     
     if (result.affectedRows === 0) {
@@ -212,16 +443,16 @@ function generateRSAKeyPair(keySize) {
   return { publicKey, privateKey };
 }
 
-async function savePublicKey(keyName, publicKey, keySize) {
+async function savePublicKey(keyName, publicKey, keySize, userId) {
   try {
     const [result] = await pool.execute(
-      'INSERT INTO public_keys (key_name, public_key, key_size) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE public_key = VALUES(public_key), key_size = VALUES(key_size), updated_at = CURRENT_TIMESTAMP',
-      [keyName, publicKey, keySize]
+      'INSERT INTO public_keys (key_name, public_key, key_size, user_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE public_key = VALUES(public_key), key_size = VALUES(key_size), updated_at = CURRENT_TIMESTAMP',
+      [keyName, publicKey, keySize, userId]
     );
     
     const [rows] = await pool.execute(
-      'SELECT * FROM public_keys WHERE key_name = ?',
-      [keyName]
+      'SELECT * FROM public_keys WHERE key_name = ? AND user_id = ?',
+      [keyName, userId]
     );
     
     return rows[0];

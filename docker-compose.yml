@@ -12,7 +12,7 @@ services:
       - MYSQL_PASSWORD=persistencia-12345
     # No exponer puerto al exterior para mayor seguridad
     # ports:
-    #   - 3306:3306
+    #  - 3306:3306
     volumes:
       - persistencia_data:/var/lib/mysql
       - ./persistencia.sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -38,7 +38,7 @@ services:
       - NODE_ENV=production
     # No exponer puerto al exterior - solo acceso interno
     # ports:
-    #   - 3000:3000
+    #  - 3000:3000
     depends_on:
       persistencia:
         condition: service_healthy

@@ -54,7 +54,7 @@ export class KeyPairGeneratorComponent {
           this.publicKey = response.publicKey;
           this.privateKey = response.privateKey;
           this.isGenerated = true;
-          this.loadSavedKeys(); // Refresh the saved keys list
+          this.loadSavedKeys();
         },
         error: (error) => {
           console.error('Error generating key pair:', error);
