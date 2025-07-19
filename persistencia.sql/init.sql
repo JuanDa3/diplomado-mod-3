@@ -31,6 +31,19 @@ CREATE TABLE IF NOT EXISTS public_keys (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabla para archivos de usuarios
+CREATE TABLE IF NOT EXISTS user_files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    original_name VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    mime_type VARCHAR(100),
+    user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Tabla de ejemplo para logs
 CREATE TABLE IF NOT EXISTS logs (
     id INT AUTO_INCREMENT PRIMARY KEY,

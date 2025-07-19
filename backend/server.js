@@ -5,6 +5,9 @@ const helmet = require('helmet');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,6 +17,48 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with timestamp and random string
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    // Allow common file types
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf', 'text/plain', 'text/csv',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/zip', 'application/x-rar-compressed'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not allowed'), false);
+    }
+  }
+});
 
 // Database configuration
 const dbConfig = {
@@ -420,6 +465,167 @@ app.delete('/api/public-keys/:keyName', authenticateToken, async (req, res) => {
     console.error('Error deleting public key:', error);
     res.status(500).json({ 
       error: 'Failed to delete public key',
+      details: error.message 
+    });
+  }
+});
+
+// File upload endpoint
+app.post('/api/files/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: 'No file uploaded' 
+      });
+    }
+
+    const { originalname, filename, size, mimetype } = req.file;
+    
+    // Save file metadata to database
+    const [result] = await pool.execute(
+      'INSERT INTO user_files (original_name, stored_name, file_size, mime_type, user_id) VALUES (?, ?, ?, ?, ?)',
+      [originalname, filename, size, mimetype, req.user.userId]
+    );
+    
+    // Get the created file record
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ?',
+      [result.insertId]
+    );
+    
+    res.status(201).json({
+      success: true,
+      file: {
+        id: files[0].id,
+        originalName: files[0].original_name,
+        storedName: files[0].stored_name,
+        fileSize: files[0].file_size,
+        mimeType: files[0].mime_type,
+        createdAt: files[0].created_at
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ 
+      error: 'Failed to upload file',
+      details: error.message 
+    });
+  }
+});
+
+// Get user files
+app.get('/api/files', authenticateToken, async (req, res) => {
+  try {
+    const [files] = await pool.execute(
+      'SELECT id, original_name, stored_name, file_size, mime_type, created_at FROM user_files WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.userId]
+    );
+    
+    res.json({
+      success: true,
+      files: files.map(file => ({
+        id: file.id,
+        originalName: file.original_name,
+        storedName: file.stored_name,
+        fileSize: file.file_size,
+        mimeType: file.mime_type,
+        createdAt: file.created_at
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching files:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch files',
+      details: error.message 
+    });
+  }
+});
+
+// Download file
+app.get('/api/files/:fileId/download', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    
+    // Get file metadata
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    const file = files[0];
+    const filePath = path.join(uploadsDir, file.stored_name);
+    
+    // Check if file exists on disk
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ 
+        error: 'File not found on disk' 
+      });
+    }
+    
+    // Set headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${file.original_name}"`);
+    res.setHeader('Content-Type', file.mime_type);
+    
+    // Send file
+    res.sendFile(filePath);
+    
+  } catch (error) {
+    console.error('Error downloading file:', error);
+    res.status(500).json({ 
+      error: 'Failed to download file',
+      details: error.message 
+    });
+  }
+});
+
+// Delete file
+app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    
+    // Get file metadata first
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    const file = files[0];
+    const filePath = path.join(uploadsDir, file.stored_name);
+    
+    // Delete from database
+    const [result] = await pool.execute(
+      'DELETE FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    // Delete file from disk
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    
+    res.json({
+      success: true,
+      message: 'File deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete file',
       details: error.message 
     });
   }
