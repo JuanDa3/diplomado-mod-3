@@ -4,8 +4,14 @@
       <h2>Key Pair Generator</h2>
     </div>
     
+    <nav class="nav-menu" *ngIf="getCurrentUser()">
+      <a routerLink="/" class="nav-link">Home</a>
+      <a routerLink="/users" class="nav-link">Users</a>
+    </nav>
+    
     <div class="user-section" *ngIf="getCurrentUser()">
       <div class="user-info">
+        <span class="user-name">{{ getCurrentUser()?.name }}</span>
         <span class="user-email">{{ getCurrentUser()?.email }}</span>
       </div>
       <button class="logout-button" (click)="logout()">

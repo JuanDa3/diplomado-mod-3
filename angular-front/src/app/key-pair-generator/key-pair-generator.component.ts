@@ -1,7 +1,8 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
+import { AuthService } from '../auth/auth.service';
 
 @Component({
   selector: 'app-key-pair-generator',
@@ -21,10 +22,12 @@ export class KeyPairGeneratorComponent {
   savedKeys: any[] = [];
   isLoadingKeys: boolean = false;
 
-  // API base URL - will be replaced with environment variable in production
   private apiUrl = '/api';
 
-  constructor(private http: HttpClient) {
+  constructor(
+    private http: HttpClient,
+    private authService: AuthService
+  ) {
     this.loadSavedKeys();
   }
 
@@ -43,7 +46,9 @@ export class KeyPairGeneratorComponent {
       keySize: this.keySize
     };
 
-    this.http.post(`${this.apiUrl}/generate-key-pair`, requestBody)
+    const headers = this.authService.getAuthHeaders();
+    
+    this.http.post(`${this.apiUrl}/generate-key-pair`, requestBody, { headers })
       .subscribe({
         next: (response: any) => {
           this.publicKey = response.publicKey;
@@ -63,7 +68,9 @@ export class KeyPairGeneratorComponent {
 
   loadSavedKeys() {
     this.isLoadingKeys = true;
-    this.http.get(`${this.apiUrl}/public-keys`)
+    const headers = this.authService.getAuthHeaders();
+    
+    this.http.get(`${this.apiUrl}/public-keys`, { headers })
       .subscribe({
         next: (response: any) => {
           this.savedKeys = response.keys || [];
@@ -80,7 +87,9 @@ export class KeyPairGeneratorComponent {
 
   deleteKey(keyName: string) {
     if (confirm(`Are you sure you want to delete the key "${keyName}"?`)) {
-      this.http.delete(`${this.apiUrl}/public-keys/${keyName}`)
+      const headers = this.authService.getAuthHeaders();
+      
+      this.http.delete(`${this.apiUrl}/public-keys/${keyName}`, { headers })
         .subscribe({
           next: () => {
             this.loadSavedKeys(); // Refresh the list

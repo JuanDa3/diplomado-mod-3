@@ -1,0 +1,88 @@
+<div class="signup-container">
+  <div class="signup-card">
+    <div class="signup-header">
+      <h1>Create Account</h1>
+      <p>Join us to start generating secure key pairs</p>
+    </div>
+
+    <form [formGroup]="signupForm" (ngSubmit)="onSubmit()" class="signup-form">
+      <div class="form-group">
+        <label for="name">Full Name</label>
+        <input
+          type="text"
+          id="name"
+          formControlName="name"
+          placeholder="Enter your full name"
+          [class.error]="signupForm.get('name')?.invalid && signupForm.get('name')?.touched"
+        />
+        <div class="error-message" *ngIf="getErrorMessage('name')">
+          {{ getErrorMessage('name') }}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input
+          type="email"
+          id="email"
+          formControlName="email"
+          placeholder="Enter your email"
+          [class.error]="signupForm.get('email')?.invalid && signupForm.get('email')?.touched"
+        />
+        <div class="error-message" *ngIf="getErrorMessage('email')">
+          {{ getErrorMessage('email') }}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          formControlName="password"
+          placeholder="Enter your password"
+          [class.error]="signupForm.get('password')?.invalid && signupForm.get('password')?.touched"
+        />
+        <div class="error-message" *ngIf="getErrorMessage('password')">
+          {{ getErrorMessage('password') }}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="confirmPassword">Confirm Password</label>
+        <input
+          type="password"
+          id="confirmPassword"
+          formControlName="confirmPassword"
+          placeholder="Confirm your password"
+          [class.error]="signupForm.get('confirmPassword')?.invalid && signupForm.get('confirmPassword')?.touched"
+        />
+        <div class="error-message" *ngIf="getErrorMessage('confirmPassword')">
+          {{ getErrorMessage('confirmPassword') }}
+        </div>
+      </div>
+
+      <div class="error-message global-error" *ngIf="errorMessage">
+        {{ errorMessage }}
+      </div>
+
+      <button
+        type="submit"
+        [disabled]="isLoading || signupForm.invalid"
+        class="signup-button"
+      >
+        <span *ngIf="!isLoading">Create Account</span>
+        <span *ngIf="isLoading" class="loading-spinner">
+          <svg class="spinner" viewBox="0 0 50 50">
+            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+          </svg>
+          Creating account...
+        </span>
+      </button>
+    </form>
+
+    <div class="signup-footer">
+      <p>Already have an account? <a routerLink="/login" class="login-link">Sign in</a></p>
+    </div>
+  </div>
+</div> 

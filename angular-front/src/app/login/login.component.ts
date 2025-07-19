@@ -1,13 +1,13 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
-import { AuthService } from '../auth/auth.service';
+import { Router, RouterModule } from '@angular/router';
+import { AuthService, LoginRequest } from '../auth/auth.service';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule],
   templateUrl: './login.component.html',
   styleUrl: './login.component.css'
 })
@@ -32,20 +32,21 @@ export class LoginComponent {
       this.isLoading = true;
       this.errorMessage = '';
 
-      const { email, password } = this.loginForm.value;
+      const credentials: LoginRequest = this.loginForm.value;
 
-      this.authService.login(email, password).subscribe({
-        next: (success) => {
+      this.authService.login(credentials).subscribe({
+        next: (response) => {
           this.isLoading = false;
-          if (success) {
+          if (response.success) {
+            this.authService.setAuthData(response.user, response.token);
             this.router.navigate(['/']);
           } else {
-            this.errorMessage = 'Invalid email or password';
+            this.errorMessage = 'Login failed';
           }
         },
         error: (error) => {
           this.isLoading = false;
-          this.errorMessage = 'An error occurred during login';
+          this.errorMessage = error.error?.error || 'An error occurred during login';
           console.error('Login error:', error);
         }
       });
