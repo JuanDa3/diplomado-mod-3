@@ -21,6 +21,17 @@ http {
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
+    # SSL Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+    ssl_ecdh_curve secp384r1;
+    ssl_session_timeout 10m;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
     # Upstream para Angular Frontend
     upstream angular_backend {
         server ${ANGULAR_IP}:80;
@@ -31,15 +42,32 @@ http {
         server ${BACKEND_IP}:3000;
     }
 
+    # Redirigir HTTP a HTTPS
     server {
         listen 80;
         server_name localhost;
+        
+        # Redirigir todo el tráfico HTTP a HTTPS
+        return 301 https://$host$request_uri;
+    }
+
+    # Servidor HTTPS principal
+    server {
+        listen 443 ssl http2;
+        server_name localhost;
+
+        # Configuración SSL
+        ssl_certificate /etc/nginx/ssl/nginx-selfsigned.crt;
+        ssl_certificate_key /etc/nginx/ssl/nginx-selfsigned.key;
+        ssl_dhparam /etc/nginx/ssl/dhparam.pem;
 
         # Security headers
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
         add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header X-XSS-Protection "1; mode=block" always;
         add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
         add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self' https: data: blob: 'unsafe-inline'; connect-src 'self' https:" always;
 
         # Proxy para API Backend
         location /api/ {
@@ -47,7 +75,8 @@ http {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-Port 443;
             
             # Timeouts
             proxy_connect_timeout 30s;
@@ -57,11 +86,12 @@ http {
 
         # Proxy para Angular Frontend (todo lo demás)
         location / {
-            proxy_pass http://angular_backend/;
+            proxy_pass http://angular_backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-Port 443;
             
             # Timeouts
             proxy_connect_timeout 30s;
@@ -72,7 +102,14 @@ http {
         # Health check del firewall
         location /firewall-health {
             access_log off;
-            return 200 "Firewall OK\n";
+            return 200 "Firewall HTTPS OK\n";
+            add_header Content-Type text/plain;
+        }
+
+        # Información SSL para debugging
+        location /ssl-info {
+            access_log off;
+            return 200 "SSL enabled - Protocol: $ssl_protocol, Cipher: $ssl_cipher\n";
             add_header Content-Type text/plain;
         }
     }

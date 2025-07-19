@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🔥 Configurando Firewall..."
+echo "🔒 Configurando Firewall HTTPS..."
 
 # Configurar iptables básico
 echo "⚙️  Configurando reglas de iptables..."
@@ -14,14 +14,17 @@ iptables -A INPUT -i lo -j ACCEPT
 # Permitir respuestas a conexiones establecidas
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Permitir tráfico HTTP entrante (puerto 80)
+# Permitir tráfico HTTP (puerto 80) para redirect a HTTPS
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+
+# Permitir tráfico HTTPS (puerto 443)
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 
 # Permitir tráfico DNS (para resolución de nombres)
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
-echo "✅ Reglas de iptables configuradas"
+echo "✅ Reglas de iptables configuradas (HTTP + HTTPS)"
 
 # Obtener IPs de los servicios
 echo "🔍 Obteniendo IPs de servicios..."
@@ -38,7 +41,7 @@ while ! curl -s "http://$ANGULAR_IP:80/health" > /dev/null 2>&1; do
     sleep 5
 done
 
-while ! curl -s "http://$BACKEND_IP:3000" > /dev/null 2>&1; do
+while ! curl -s "http://$BACKEND_IP:3000/health" > /dev/null 2>&1; do
     echo "⏳ Esperando que Backend esté disponible..."
     sleep 5
 done
@@ -56,18 +59,28 @@ if [ $? -eq 0 ]; then
     echo "✅ Configuración de nginx válida"
 else
     echo "❌ Error en configuración de nginx"
+    cat /etc/nginx/nginx.conf
     exit 1
 fi
 
+# Mostrar información de certificados
+echo "🔐 Información de certificados SSL:"
+openssl x509 -in /etc/nginx/ssl/nginx-selfsigned.crt -text -noout | grep -E "(Subject:|Not Before:|Not After:)"
+
 # Iniciar nginx
-echo "🚀 Iniciando nginx..."
+echo "🚀 Iniciando nginx con HTTPS..."
 nginx -g "daemon off;" &
 
-echo "🔥 Firewall configurado y nginx iniciado"
-echo "📡 Firewall escuchando en puerto 80"
+echo "🔒 Firewall HTTPS configurado y nginx iniciado"
+echo "📡 Firewall escuchando en:"
+echo "   - Puerto 80 (HTTP → redirect a HTTPS)"
+echo "   - Puerto 443 (HTTPS)"
 echo "🔀 Redirigiendo:"
-echo "   - / -> Angular ($ANGULAR_IP:80)"
-echo "   - /api/ -> Backend ($BACKEND_IP:3000)"
+echo "   - / → Angular ($ANGULAR_IP:80)"
+echo "   - /api/ → Backend ($BACKEND_IP:3000)"
+echo ""
+echo "🌐 Acceder a: https://localhost"
+echo "⚠️  Certificado auto-firmado - el navegador mostrará advertencia de seguridad"
 
 # Mantener el contenedor corriendo
 wait
