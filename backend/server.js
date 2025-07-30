@@ -8,10 +8,17 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { OAuth2Client } = require('google-auth-library');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+// Google OAuth configuration
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '52426363202-l70p16ngub3nm3tumn37vnit7lhmislb.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // Middleware
 app.use(helmet());
@@ -94,16 +101,20 @@ async function initializeDatabase() {
 
 async function createTables() {
   try {
-    // Create users table
+    // Create users table with Google OAuth support
     const createUsersTableSQL = `
       CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
-        password VARCHAR(255) NOT NULL,
+        password VARCHAR(255) NULL,
+        google_id VARCHAR(255) NULL UNIQUE,
+        google_picture VARCHAR(500) NULL,
+        auth_provider ENUM('local', 'google') DEFAULT 'local',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_email (email)
+        UNIQUE KEY unique_email (email),
+        UNIQUE KEY unique_google_id (google_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     
@@ -136,7 +147,7 @@ async function createTables() {
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-
+  console.log('token', token);
   if (!token) {
     return res.status(401).json({ error: 'Access token required' });
   }
@@ -180,14 +191,21 @@ app.post('/api/auth/register', async (req, res) => {
     
     // Check if user already exists
     const [existingUsers] = await pool.execute(
-      'SELECT id FROM users WHERE email = ?',
+      'SELECT id, auth_provider FROM users WHERE email = ?',
       [email]
     );
     
     if (existingUsers.length > 0) {
-      return res.status(409).json({ 
-        error: 'User with this email already exists' 
-      });
+      const existingUser = existingUsers[0];
+      if (existingUser.auth_provider === 'google') {
+        return res.status(409).json({ 
+          error: 'An account with this email already exists using Google Sign-In. Please use Google Sign-In to access your account.' 
+        });
+      } else {
+        return res.status(409).json({ 
+          error: 'User with this email already exists' 
+        });
+      }
     }
     
     // Hash password
@@ -247,7 +265,7 @@ app.post('/api/auth/login', async (req, res) => {
     
     // Find user by email
     const [users] = await pool.execute(
-      'SELECT id, name, email, password FROM users WHERE email = ?',
+      'SELECT id, name, email, password, auth_provider FROM users WHERE email = ?',
       [email]
     );
     
@@ -258,6 +276,13 @@ app.post('/api/auth/login', async (req, res) => {
     }
     
     const user = users[0];
+    
+    // Check if user is a Google OAuth user
+    if (user.auth_provider === 'google') {
+      return res.status(401).json({ 
+        error: 'This account was created with Google. Please use Google Sign-In.' 
+      });
+    }
     
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
@@ -294,11 +319,92 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Google OAuth login
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    
+    if (!idToken) {
+      return res.status(400).json({ 
+        error: 'Google ID token is required' 
+      });
+    }
+    
+    // Verify Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken: idToken,
+      audience: GOOGLE_CLIENT_ID
+    });
+    
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+    
+    // Check if user exists
+    let [users] = await pool.execute(
+      'SELECT id, name, email, auth_provider FROM users WHERE email = ? OR google_id = ?',
+      [email, googleId]
+    );
+    
+    let user;
+    
+    if (users.length > 0) {
+      // User exists, update Google ID if needed
+      user = users[0];
+      
+      if (!user.google_id) {
+        // Link existing email account with Google
+        await pool.execute(
+          'UPDATE users SET google_id = ?, google_picture = ?, auth_provider = ? WHERE id = ?',
+          [googleId, picture, 'google', user.id]
+        );
+      }
+    } else {
+      // Create new user
+      const [result] = await pool.execute(
+        'INSERT INTO users (name, email, google_id, google_picture, auth_provider) VALUES (?, ?, ?, ?, ?)',
+        [name, email, googleId, picture, 'google']
+      );
+      
+      user = {
+        id: result.insertId,
+        name,
+        email,
+        auth_provider: 'google'
+      };
+    }
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, name: user.name },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        picture: picture
+      },
+      token
+    });
+    
+  } catch (error) {
+    console.error('Error with Google OAuth:', error);
+    res.status(500).json({ 
+      error: 'Failed to authenticate with Google',
+      details: error.message 
+    });
+  }
+});
+
 // Get current user profile
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const [users] = await pool.execute(
-      'SELECT id, name, email, created_at FROM users WHERE id = ?',
+      'SELECT id, name, email, google_picture, auth_provider, created_at FROM users WHERE id = ?',
       [req.user.userId]
     );
     
@@ -314,6 +420,8 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
         id: users[0].id,
         name: users[0].name,
         email: users[0].email,
+        picture: users[0].google_picture,
+        authProvider: users[0].auth_provider,
         createdAt: users[0].created_at
       }
     });

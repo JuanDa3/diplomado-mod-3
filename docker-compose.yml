@@ -10,7 +10,6 @@ services:
       - MYSQL_DATABASE=persistencia
       - MYSQL_USER=user
       - MYSQL_PASSWORD=persistencia-12345
-    # No exponer puerto al exterior para mayor seguridad
     # ports:
     #  - 3306:3306
     volumes:
@@ -36,6 +35,8 @@ services:
       - DB_USER=user
       - DB_PASSWORD=persistencia-12345
       - NODE_ENV=production
+      - GOOGLE_CLIENT_ID=52426363202-l70p16ngub3nm3tumn37vnit7lhmislb.apps.googleusercontent.com
+      - GOOGLE_CLIENT_SECRET=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
     # No exponer puerto al exterior - solo acceso interno
     # ports:
     #  - 3000:3000
@@ -52,7 +53,6 @@ services:
       context: ./angular-front
       dockerfile: Dockerfile
     container_name: angular-frontend
-    # No exponer puerto al exterior - solo acceso interno
     # ports:
     #   - 80:80
     depends_on:
@@ -71,9 +71,8 @@ services:
       dockerfile: Dockerfile
     container_name: firewall
     ports:
-      # Exponer HTTP (redirect) y HTTPS
-      - "80:80"   # HTTP redirect a HTTPS
-      - "443:443" # HTTPS principal
+      - "80:80"
+      - "443:443"
     cap_add:
       - NET_ADMIN
     privileged: true

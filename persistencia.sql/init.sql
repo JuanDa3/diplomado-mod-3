@@ -1,21 +1,27 @@
 -- Script de inicialización de la base de datos
--- Crear tablas básicas para la aplicación
+-- Crear tablas básicas para la aplicación con soporte para Google OAuth
 
 USE persistencia;
 
 -- Drop existing tables if they exist (to ensure clean schema)
+DROP TABLE IF EXISTS file_signatures;
+DROP TABLE IF EXISTS user_files;
 DROP TABLE IF EXISTS public_keys;
 DROP TABLE IF EXISTS users;
 
--- Tabla de usuarios con autenticación
+-- Tabla de usuarios con soporte para Google OAuth
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NULL,
+    google_id VARCHAR(255) NULL UNIQUE,
+    google_picture VARCHAR(500) NULL,
+    auth_provider ENUM('local', 'google') DEFAULT 'local',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_email (email)
+    UNIQUE KEY unique_email (email),
+    UNIQUE KEY unique_google_id (google_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Tabla para claves públicas
@@ -71,7 +77,12 @@ CREATE TABLE IF NOT EXISTS logs (
 INSERT INTO logs (message, level) VALUES 
     ('Base de datos inicializada correctamente', 'INFO'),
     ('Sistema de autenticación configurado', 'INFO'),
-    ('Tabla de usuarios creada', 'INFO');
+    ('Soporte para Google OAuth habilitado', 'INFO'),
+    ('Tabla de usuarios creada con campos para OAuth', 'INFO'),
+    ('Sistema de firmas digitales configurado', 'INFO');
 
 -- Mostrar las tablas creadas
-SHOW TABLES; 
+SHOW TABLES;
+
+-- Mostrar la estructura de la tabla users para verificar los campos de OAuth
+DESCRIBE users; 
