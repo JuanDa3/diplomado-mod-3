@@ -6,6 +6,8 @@ export interface User {
   id: number;
   name: string;
   email: string;
+  picture?: string;
+  authProvider?: 'local' | 'google';
   createdAt?: string;
 }
 
@@ -24,6 +26,10 @@ export interface RegisterRequest {
 export interface LoginRequest {
   email: string;
   password: string;
+}
+
+export interface GoogleAuthRequest {
+  idToken: string;
 }
 
 @Injectable({
@@ -50,6 +56,10 @@ export class AuthService {
 
   login(credentials: LoginRequest): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/auth/login`, credentials);
+  }
+
+  googleLogin(idToken: string): Observable<AuthResponse> {
+    return this.http.post<AuthResponse>(`${this.apiUrl}/auth/google`, { idToken });
   }
 
   logout(): void {

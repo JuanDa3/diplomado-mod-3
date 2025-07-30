@@ -1,8 +1,10 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService, RegisterRequest } from '../auth/auth.service';
+
+declare var google: any;
 
 @Component({
   selector: 'app-signup',
@@ -11,10 +13,11 @@ import { AuthService, RegisterRequest } from '../auth/auth.service';
   templateUrl: './signup.component.html',
   styleUrl: './signup.component.css'
 })
-export class SignupComponent {
+export class SignupComponent implements OnInit, AfterViewInit {
   signupForm: FormGroup;
   isLoading = false;
   errorMessage = '';
+  googleInitialized = false;
 
   constructor(
     private fb: FormBuilder,
@@ -27,6 +30,74 @@ export class SignupComponent {
       password: ['', [Validators.required, Validators.minLength(6)]],
       confirmPassword: ['', [Validators.required]]
     }, { validators: this.passwordMatchValidator.bind(this) });
+  }
+
+  ngOnInit(): void {
+    // Initialize Google Sign-In
+    this.initializeGoogleSignIn();
+  }
+
+  ngAfterViewInit(): void {
+    // Render Google Sign-In button after view is initialized
+    this.renderGoogleSignInButton();
+  }
+
+  private initializeGoogleSignIn(): void {
+    // Wait for Google script to load
+    const checkGoogle = () => {
+      if (typeof google !== 'undefined' && google.accounts) {
+        this.googleInitialized = true;
+        this.renderGoogleSignInButton();
+      } else {
+        setTimeout(checkGoogle, 100);
+      }
+    };
+    checkGoogle();
+  }
+
+  private renderGoogleSignInButton(): void {
+    if (!this.googleInitialized) return;
+
+    try {
+      google.accounts.id.initialize({
+        client_id: '52426363202-l70p16ngub3nm3tumn37vnit7lhmislb.apps.googleusercontent.com',
+        callback: this.handleGoogleSignIn.bind(this)
+      });
+
+      google.accounts.id.renderButton(
+        document.getElementById('google-signin-button'),
+        { 
+          theme: 'outline', 
+          size: 'large',
+          width: '100%',
+          text: 'signup_with'
+        }
+      );
+    } catch (error) {
+      console.error('Error rendering Google Sign-In button:', error);
+    }
+  }
+
+  private handleGoogleSignIn(response: any): void {
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    this.authService.googleLogin(response.credential).subscribe({
+      next: (authResponse) => {
+        this.isLoading = false;
+        if (authResponse.success) {
+          this.authService.setAuthData(authResponse.user, authResponse.token);
+          this.router.navigate(['/']);
+        } else {
+          this.errorMessage = 'Google signup failed';
+        }
+      },
+      error: (error) => {
+        this.isLoading = false;
+        this.errorMessage = error.error?.error || 'An error occurred during Google signup';
+        console.error('Google signup error:', error);
+      }
+    });
   }
 
   passwordMatchValidator(form: FormGroup) {
