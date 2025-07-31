@@ -1,0 +1,120 @@
+<div class="dialog-overlay" *ngIf="isVisible" (click)="onBackdropClick($event)">
+  <div class="dialog-content">
+    <div class="dialog-header">
+      <h2>📤 Share File</h2>
+      <button class="close-button" (click)="onClose()" title="Close dialog">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="dialog-body">
+      <div class="file-info">
+        <h3>Sharing: {{ fileName }}</h3>
+      </div>
+
+      <!-- Error Message -->
+      <div class="error-message" *ngIf="errorMessage">
+        ❌ {{ errorMessage }}
+      </div>
+
+      <!-- Loading State -->
+      <div class="loading-container" *ngIf="isLoading">
+        <div class="loading-spinner">
+          <svg class="spinner" viewBox="0 0 50 50">
+            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+          </svg>
+          <p>Loading users...</p>
+        </div>
+      </div>
+
+      <!-- User Selection -->
+      <div class="user-selection" *ngIf="!isLoading">
+        <h4>Select Users to Share With</h4>
+        
+        <div class="users-list">
+          <div 
+            class="user-item" 
+            *ngFor="let user of users"
+            [class.selected]="isUserSelected(user.id)"
+            (click)="toggleUserSelection(user.id)"
+          >
+            <div class="user-info">
+              <div class="user-avatar">
+                {{ user.name.charAt(0).toUpperCase() }}
+              </div>
+              <div class="user-details">
+                <span class="user-name">{{ user.name }}</span>
+                <span class="user-email">{{ user.email }}</span>
+              </div>
+            </div>
+            <div class="selection-indicator">
+              <svg *ngIf="isUserSelected(user.id)" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20,6 9,17 4,12"></polyline>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="selected-count" *ngIf="selectedUserIds.length > 0">
+          {{ selectedUserIds.length }} user(s) selected
+        </div>
+      </div>
+
+      <!-- Permissions -->
+      <div class="permissions-section" *ngIf="!isLoading">
+        <h4>Permissions</h4>
+        
+        <div class="permission-options">
+          <label class="permission-option">
+            <input 
+              type="checkbox" 
+              [(ngModel)]="canDownload"
+              [disabled]="isSharing"
+            >
+            <span class="checkmark"></span>
+            <div class="permission-text">
+              <span class="permission-title">Download</span>
+              <span class="permission-description">Allow users to download this file</span>
+            </div>
+          </label>
+
+          <label class="permission-option">
+            <input 
+              type="checkbox" 
+              [(ngModel)]="canSign"
+              [disabled]="isSharing"
+            >
+            <span class="checkmark"></span>
+            <div class="permission-text">
+              <span class="permission-title">Sign</span>
+              <span class="permission-description">Allow users to sign this file with their private key</span>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-footer">
+      <button 
+        class="cancel-button" 
+        (click)="onClose()"
+        [disabled]="isSharing"
+      >
+        Cancel
+      </button>
+      <button 
+        class="share-button" 
+        (click)="shareFile()"
+        [disabled]="isSharing || selectedUserIds.length === 0"
+      >
+        <svg *ngIf="isSharing" class="spinner" width="16" height="16" viewBox="0 0 50 50">
+          <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+        </svg>
+        {{ isSharing ? 'Sharing...' : 'Share File' }}
+      </button>
+    </div>
+  </div>
+</div> 

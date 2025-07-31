@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../auth/auth.service';
+import { ShareFileDialogComponent } from '../share-file-dialog/share-file-dialog.component';
 
 export interface UserFile {
   id: number;
@@ -26,7 +27,7 @@ export interface UploadResponse {
 @Component({
   selector: 'app-file-upload',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ShareFileDialogComponent],
   templateUrl: './file-upload.component.html',
   styleUrl: './file-upload.component.css'
 })
@@ -37,6 +38,8 @@ export class FileUploadComponent implements OnInit {
   isDragOver = false;
   errorMessage = '';
   uploadProgress = 0;
+  showShareDialog = false;
+  selectedFileForSharing: UserFile | null = null;
   private apiUrl = '/api';
 
   constructor(
@@ -218,5 +221,20 @@ export class FileUploadComponent implements OnInit {
   getTotalSize(): string {
     const totalBytes = this.files.reduce((sum, file) => sum + file.fileSize, 0);
     return this.formatFileSize(totalBytes);
+  }
+
+  openShareDialog(file: UserFile): void {
+    this.selectedFileForSharing = file;
+    this.showShareDialog = true;
+  }
+
+  closeShareDialog(): void {
+    this.showShareDialog = false;
+    this.selectedFileForSharing = null;
+  }
+
+  onFileShared(): void {
+    // Optionally refresh the files list or show a success message
+    this.loadFiles();
   }
 } 

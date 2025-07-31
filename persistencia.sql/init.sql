@@ -5,6 +5,7 @@ USE persistencia;
 
 -- Drop existing tables if they exist (to ensure clean schema)
 DROP TABLE IF EXISTS file_signatures;
+DROP TABLE IF EXISTS shared_files;
 DROP TABLE IF EXISTS user_files;
 DROP TABLE IF EXISTS public_keys;
 DROP TABLE IF EXISTS users;
@@ -46,9 +47,25 @@ CREATE TABLE IF NOT EXISTS user_files (
     mime_type VARCHAR(100),
     file_hash VARCHAR(64) NOT NULL,
     user_id INT NOT NULL,
+    is_shared BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabla para archivos compartidos (permite que múltiples usuarios accedan a archivos compartidos)
+CREATE TABLE IF NOT EXISTS shared_files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    file_id INT NOT NULL,
+    shared_by_user_id INT NOT NULL,
+    shared_with_user_id INT NOT NULL,
+    can_sign BOOLEAN DEFAULT TRUE,
+    can_download BOOLEAN DEFAULT TRUE,
+    shared_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (file_id) REFERENCES user_files(id) ON DELETE CASCADE,
+    FOREIGN KEY (shared_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (shared_with_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_file_share (file_id, shared_with_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Tabla para firmas digitales de archivos
@@ -79,7 +96,8 @@ INSERT INTO logs (message, level) VALUES
     ('Sistema de autenticación configurado', 'INFO'),
     ('Soporte para Google OAuth habilitado', 'INFO'),
     ('Tabla de usuarios creada con campos para OAuth', 'INFO'),
-    ('Sistema de firmas digitales configurado', 'INFO');
+    ('Sistema de firmas digitales configurado', 'INFO'),
+    ('Sistema de archivos compartidos configurado', 'INFO');
 
 -- Mostrar las tablas creadas
 SHOW TABLES;

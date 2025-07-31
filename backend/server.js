@@ -133,8 +133,60 @@ async function createTables() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     
+    // Create user_files table with sharing support
+    const createUserFilesTableSQL = `
+      CREATE TABLE IF NOT EXISTS user_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        original_name VARCHAR(255) NOT NULL,
+        stored_name VARCHAR(255) NOT NULL,
+        file_size BIGINT NOT NULL,
+        mime_type VARCHAR(100),
+        file_hash VARCHAR(64) NOT NULL,
+        user_id INT NOT NULL,
+        is_shared BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    
+    // Create shared_files table
+    const createSharedFilesTableSQL = `
+      CREATE TABLE IF NOT EXISTS shared_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        file_id INT NOT NULL,
+        shared_by_user_id INT NOT NULL,
+        shared_with_user_id INT NOT NULL,
+        can_sign BOOLEAN DEFAULT TRUE,
+        can_download BOOLEAN DEFAULT TRUE,
+        shared_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (file_id) REFERENCES user_files(id) ON DELETE CASCADE,
+        FOREIGN KEY (shared_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (shared_with_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_file_share (file_id, shared_with_user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    
+    // Create file_signatures table
+    const createFileSignaturesTableSQL = `
+      CREATE TABLE IF NOT EXISTS file_signatures (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        file_id INT NOT NULL,
+        signer_id INT NOT NULL,
+        signature_data TEXT NOT NULL,
+        signature_hash VARCHAR(64) NOT NULL,
+        signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (file_id) REFERENCES user_files(id) ON DELETE CASCADE,
+        FOREIGN KEY (signer_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_file_signer (file_id, signer_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    
     await pool.execute(createUsersTableSQL);
     await pool.execute(createKeysTableSQL);
+    await pool.execute(createUserFilesTableSQL);
+    await pool.execute(createSharedFilesTableSQL);
+    await pool.execute(createFileSignaturesTableSQL);
     console.log('✅ Database tables created/verified');
     
   } catch (error) {
@@ -752,7 +804,7 @@ app.post('/api/files/:fileId/verify', authenticateToken, async (req, res) => {
   }
 });
 
-// Get files available for signing (only user's own files)
+// Get files available for signing (user's own files and shared files)
 app.get('/api/files/available-for-signing', authenticateToken, async (req, res) => {
   try {
     const [files] = await pool.execute(`
@@ -765,13 +817,33 @@ app.get('/api/files/available-for-signing', authenticateToken, async (req, res) 
         uf.created_at,
         u.name as owner_name,
         u.email as owner_email,
-        CASE WHEN fs.id IS NOT NULL THEN true ELSE false END as is_signed_by_user
+        CASE WHEN fs.id IS NOT NULL THEN true ELSE false END as is_signed_by_user,
+        CASE WHEN uf.user_id = ? THEN 'own' ELSE 'shared' END as file_type
       FROM user_files uf
       JOIN users u ON uf.user_id = u.id
       LEFT JOIN file_signatures fs ON uf.id = fs.file_id AND fs.signer_id = ?
       WHERE uf.user_id = ?
-      ORDER BY uf.created_at DESC
-    `, [req.user.userId, req.user.userId]);
+      
+      UNION
+      
+      SELECT 
+        uf.id, 
+        uf.original_name, 
+        uf.file_size, 
+        uf.mime_type, 
+        uf.file_hash,
+        uf.created_at,
+        u.name as owner_name,
+        u.email as owner_email,
+        CASE WHEN fs.id IS NOT NULL THEN true ELSE false END as is_signed_by_user,
+        'shared' as file_type
+      FROM user_files uf
+      JOIN users u ON uf.user_id = u.id
+      JOIN shared_files sf ON uf.id = sf.file_id
+      LEFT JOIN file_signatures fs ON uf.id = fs.file_id AND fs.signer_id = ?
+      WHERE sf.shared_with_user_id = ? AND sf.can_sign = true
+      ORDER BY created_at DESC
+    `, [req.user.userId, req.user.userId, req.user.userId, req.user.userId, req.user.userId]);
     
     res.json({
       success: true,
@@ -784,7 +856,8 @@ app.get('/api/files/available-for-signing', authenticateToken, async (req, res) 
         createdAt: file.created_at,
         ownerName: file.owner_name,
         ownerEmail: file.owner_email,
-        isSignedByUser: file.is_signed_by_user
+        isSignedByUser: file.is_signed_by_user,
+        fileType: file.file_type
       }))
     });
     
@@ -1054,6 +1127,247 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
     console.error('Error deleting file:', error);
     res.status(500).json({ 
       error: 'Failed to delete file',
+      details: error.message 
+    });
+  }
+});
+
+// Share file with users
+app.post('/api/files/:fileId/share', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { userIds, canSign = true, canDownload = true } = req.body;
+    
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ 
+        error: 'User IDs array is required' 
+      });
+    }
+    
+    // Check if file exists and belongs to user
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    // Mark file as shared
+    await pool.execute(
+      'UPDATE user_files SET is_shared = true WHERE id = ?',
+      [fileId]
+    );
+    
+    // Share with each user
+    const sharedUsers = [];
+    for (const userId of userIds) {
+      try {
+        // Check if user exists
+        const [users] = await pool.execute(
+          'SELECT id, name, email FROM users WHERE id = ?',
+          [userId]
+        );
+        
+        if (users.length === 0) {
+          continue; // Skip non-existent users
+        }
+        
+        // Check if already shared
+        const [existingShares] = await pool.execute(
+          'SELECT id FROM shared_files WHERE file_id = ? AND shared_with_user_id = ?',
+          [fileId, userId]
+        );
+        
+        if (existingShares.length === 0) {
+          // Create new share
+          await pool.execute(
+            'INSERT INTO shared_files (file_id, shared_by_user_id, shared_with_user_id, can_sign, can_download) VALUES (?, ?, ?, ?, ?)',
+            [fileId, req.user.userId, userId, canSign, canDownload]
+          );
+        } else {
+          // Update existing share
+          await pool.execute(
+            'UPDATE shared_files SET can_sign = ?, can_download = ? WHERE file_id = ? AND shared_with_user_id = ?',
+            [canSign, canDownload, fileId, userId]
+          );
+        }
+        
+        sharedUsers.push({
+          id: users[0].id,
+          name: users[0].name,
+          email: users[0].email
+        });
+        
+      } catch (shareError) {
+        console.error(`Error sharing with user ${userId}:`, shareError);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `File shared with ${sharedUsers.length} users`,
+      sharedUsers
+    });
+    
+  } catch (error) {
+    console.error('Error sharing file:', error);
+    res.status(500).json({ 
+      error: 'Failed to share file',
+      details: error.message 
+    });
+  }
+});
+
+// Get shared files (files shared with current user)
+app.get('/api/files/shared', authenticateToken, async (req, res) => {
+  try {
+    const [files] = await pool.execute(`
+      SELECT 
+        uf.id,
+        uf.original_name,
+        uf.file_size,
+        uf.mime_type,
+        uf.file_hash,
+        uf.created_at,
+        u.name as owner_name,
+        u.email as owner_email,
+        sf.can_sign,
+        sf.can_download,
+        sf.shared_at,
+        CASE WHEN fs.id IS NOT NULL THEN true ELSE false END as is_signed_by_user
+      FROM user_files uf
+      JOIN users u ON uf.user_id = u.id
+      JOIN shared_files sf ON uf.id = sf.file_id
+      LEFT JOIN file_signatures fs ON uf.id = fs.file_id AND fs.signer_id = ?
+      WHERE sf.shared_with_user_id = ?
+      ORDER BY sf.shared_at DESC
+    `, [req.user.userId, req.user.userId]);
+    
+    res.json({
+      success: true,
+      files: files.map(file => ({
+        id: file.id,
+        originalName: file.original_name,
+        fileSize: file.file_size,
+        mimeType: file.mime_type,
+        fileHash: file.file_hash,
+        createdAt: file.created_at,
+        ownerName: file.owner_name,
+        ownerEmail: file.owner_email,
+        canSign: file.can_sign,
+        canDownload: file.can_download,
+        sharedAt: file.shared_at,
+        isSignedByUser: file.is_signed_by_user
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching shared files:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch shared files',
+      details: error.message 
+    });
+  }
+});
+
+// Get files shared by current user
+app.get('/api/files/shared-by-me', authenticateToken, async (req, res) => {
+  try {
+    const [files] = await pool.execute(`
+      SELECT 
+        uf.id,
+        uf.original_name,
+        uf.file_size,
+        uf.mime_type,
+        uf.created_at,
+        COUNT(sf.id) as shared_count,
+        GROUP_CONCAT(u.name SEPARATOR ', ') as shared_with_users
+      FROM user_files uf
+      LEFT JOIN shared_files sf ON uf.id = sf.file_id
+      LEFT JOIN users u ON sf.shared_with_user_id = u.id
+      WHERE uf.user_id = ? AND uf.is_shared = true
+      GROUP BY uf.id
+      ORDER BY uf.created_at DESC
+    `, [req.user.userId]);
+    
+    res.json({
+      success: true,
+      files: files.map(file => ({
+        id: file.id,
+        originalName: file.original_name,
+        fileSize: file.file_size,
+        mimeType: file.mime_type,
+        createdAt: file.created_at,
+        sharedCount: file.shared_count,
+        sharedWithUsers: file.shared_with_users || 'No users'
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching files shared by user:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch files shared by user',
+      details: error.message 
+    });
+  }
+});
+
+// Remove file sharing
+app.delete('/api/files/:fileId/share/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { fileId, userId } = req.params;
+    
+    // Check if file exists and belongs to user
+    const [files] = await pool.execute(
+      'SELECT * FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, req.user.userId]
+    );
+    
+    if (files.length === 0) {
+      return res.status(404).json({ 
+        error: 'File not found' 
+      });
+    }
+    
+    // Remove sharing
+    const [result] = await pool.execute(
+      'DELETE FROM shared_files WHERE file_id = ? AND shared_with_user_id = ?',
+      [fileId, userId]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ 
+        error: 'File sharing not found' 
+      });
+    }
+    
+    // Check if file is still shared with anyone
+    const [remainingShares] = await pool.execute(
+      'SELECT COUNT(*) as count FROM shared_files WHERE file_id = ?',
+      [fileId]
+    );
+    
+    // If no more shares, mark file as not shared
+    if (remainingShares[0].count === 0) {
+      await pool.execute(
+        'UPDATE user_files SET is_shared = false WHERE id = ?',
+        [fileId]
+      );
+    }
+    
+    res.json({
+      success: true,
+      message: 'File sharing removed successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error removing file sharing:', error);
+    res.status(500).json({ 
+      error: 'Failed to remove file sharing',
       details: error.message 
     });
   }

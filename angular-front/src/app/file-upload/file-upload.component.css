@@ -288,6 +288,16 @@
   background: white;
 }
 
+.share-button {
+  color: #667eea;
+  border-color: #667eea;
+}
+
+.share-button:hover {
+  background: #667eea;
+  color: white;
+}
+
 .verify-button {
   color: #28a745;
   border-color: #28a745;
