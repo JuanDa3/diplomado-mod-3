@@ -600,6 +600,35 @@ app.get('/api/public-keys/:keyName', authenticateToken, async (req, res) => {
   }
 });
 
+// Get public keys for a specific user
+app.get('/api/users/:userId/public-keys', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+      
+    const [rows] = await pool.execute(
+      'SELECT id, key_name, key_size, created_at FROM public_keys WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+    
+    res.json({
+      success: true,
+      keys: rows.map(key => ({
+        id: key.id,
+        keyName: key.key_name,
+        keySize: key.key_size,
+        createdAt: key.created_at
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error fetching user public keys:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch user public keys',
+      details: error.message 
+    });
+  }
+});
+
 // Delete public key (updated to filter by user)
 app.delete('/api/public-keys/:keyName', authenticateToken, async (req, res) => {
   try {
@@ -908,9 +937,90 @@ app.post('/api/files/:fileId/sign', authenticateToken, async (req, res) => {
       });
     }
     
-    // Verify private key format and create signature
+    // Check if user has permission to sign this file
+    const [permissions] = await pool.execute(`
+      SELECT 
+        CASE 
+          WHEN uf.user_id = ? THEN true
+          WHEN sf.can_sign = true THEN true
+          ELSE false
+        END as can_sign
+      FROM user_files uf
+      LEFT JOIN shared_files sf ON uf.id = sf.file_id AND sf.shared_with_user_id = ?
+      WHERE uf.id = ?
+    `, [req.user.userId, req.user.userId, fileId]);
+    
+    if (permissions.length === 0 || !permissions[0].can_sign) {
+      return res.status(403).json({ 
+        error: 'You do not have permission to sign this file' 
+      });
+    }
+    
+    // Get all public keys for the current user to validate the private key
+    const [userPublicKeys] = await pool.execute(
+      'SELECT id, key_name, public_key FROM public_keys WHERE user_id = ?',
+      [req.user.userId]
+    );
+    
+    if (userPublicKeys.length === 0) {
+      return res.status(400).json({ 
+        error: 'You must generate a key pair before signing files' 
+      });
+    }
+    
+    // CRITICAL SECURITY FIX: Validate that the private key belongs to the current user
+    let validKeyPair = null;
+    
+    // First, let's get ALL public keys from ALL users to ensure we're not accidentally matching someone else's key
+    const [allPublicKeys] = await pool.execute(
+      'SELECT id, user_id, key_name, public_key FROM public_keys'
+    );
+    
+    // Test the private key against all public keys to find which one it matches
+    let matchingPublicKey = null;
+    for (const publicKeyRecord of allPublicKeys) {
+      try {
+        const testSign = crypto.createSign('SHA256');
+        testSign.update('test_validation');
+        testSign.end();
+        
+        const testSig = testSign.sign(privateKey, 'base64');
+        
+        const testVerify = crypto.createVerify('SHA256');
+        testVerify.update('test_validation');
+        testVerify.end();
+        
+        const isValid = testVerify.verify(publicKeyRecord.public_key, testSig, 'base64');
+        
+        if (isValid) {
+          matchingPublicKey = publicKeyRecord;
+          break;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    // If no matching public key found, the private key is invalid
+    if (!matchingPublicKey) {
+      return res.status(400).json({ 
+        error: 'Invalid private key provided. The private key does not correspond to any public key in the system.' 
+      });
+    }
+    
+    // if the matching public key belongs to the current user
+    if (matchingPublicKey.user_id !== req.user.userId) {
+      return res.status(403).json({ 
+        error: 'SECURITY VIOLATION: You are attempting to sign with a private key that belongs to another user. You can only sign with your own private keys.',
+        details: `The private key corresponds to a public key owned by user ID: ${matchingPublicKey.user_id}`
+      });
+    }
+    
+    // If we reach here, the private key is valid and belongs to the current user
+    validKeyPair = matchingPublicKey;
+    
+    // Now create the actual signature for the file
     try {
-      // Create signature using the file hash and private key
       const sign = crypto.createSign('SHA256');
       sign.update(file.file_hash);
       sign.end();
@@ -918,7 +1028,7 @@ app.post('/api/files/:fileId/sign', authenticateToken, async (req, res) => {
       const signature = sign.sign(privateKey, 'base64');
       const signatureHash = crypto.createHash('sha256').update(signature).digest('hex');
       
-      // Save signature to database
+      // Save signature to database with reference to the public key used
       const [result] = await pool.execute(
         'INSERT INTO file_signatures (file_id, signer_id, signature_data, signature_hash) VALUES (?, ?, ?, ?)',
         [fileId, req.user.userId, signature, signatureHash]
@@ -926,11 +1036,13 @@ app.post('/api/files/:fileId/sign', authenticateToken, async (req, res) => {
       
       res.status(201).json({
         success: true,
-        message: 'File signed successfully',
+        message: 'File signed successfully with your own private key',
         signature: {
           id: result.insertId,
           signatureHash: signatureHash,
-          signedAt: new Date().toISOString()
+          signedAt: new Date().toISOString(),
+          keyName: validKeyPair.key_name,
+          keyOwner: 'Current user (validated)'
         }
       });
       
@@ -984,9 +1096,9 @@ app.post('/api/files/:fileId/verify-signature', authenticateToken, async (req, r
     
     const signature = signatures[0];
     
-    // Get signer's public key (assuming it's stored in public_keys table)
+    // Get signer's public keys to try verification with each one
     const [publicKeys] = await pool.execute(
-      'SELECT public_key FROM public_keys WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+      'SELECT id, key_name, public_key FROM public_keys WHERE user_id = ? ORDER BY created_at DESC',
       [signerId]
     );
     
@@ -996,34 +1108,44 @@ app.post('/api/files/:fileId/verify-signature', authenticateToken, async (req, r
       });
     }
     
-    const publicKey = publicKeys[0].public_key;
+    // Try to verify signature with each public key
+    let isValid = false;
+    let verifiedWithKey = null;
     
-    // Verify signature
-    try {
-      const verify = crypto.createVerify('SHA256');
-      verify.update(file.file_hash);
-      verify.end();
-      
-      const isValid = verify.verify(publicKey, signature.signature_data, 'base64');
-      
-      res.json({
-        success: true,
-        isValid: isValid,
-        signature: {
-          id: signature.id,
-          signatureHash: signature.signature_hash,
-          signedAt: signature.signed_at,
-          signerId: signature.signer_id
-        },
-        message: isValid ? 'Signature is valid' : 'Signature is invalid'
-      });
-      
-    } catch (verifyError) {
-      res.status(400).json({ 
-        error: 'Signature verification failed',
-        details: verifyError.message 
-      });
+    for (const publicKeyRecord of publicKeys) {
+      try {
+        const verify = crypto.createVerify('SHA256');
+        verify.update(file.file_hash);
+        verify.end();
+        
+        const keyValid = verify.verify(publicKeyRecord.public_key, signature.signature_data, 'base64');
+        
+        if (keyValid) {
+          isValid = true;
+          verifiedWithKey = publicKeyRecord;
+          break;
+        }
+      } catch (verifyError) {
+        // Continue to next key if this one fails
+        continue;
+      }
     }
+    
+    res.json({
+      success: true,
+      isValid: isValid,
+      signature: {
+        id: signature.id,
+        signatureHash: signature.signature_hash,
+        signedAt: signature.signed_at,
+        signerId: signature.signer_id
+      },
+      verificationDetails: {
+        verifiedWithKey: verifiedWithKey ? verifiedWithKey.key_name : null,
+        totalKeysChecked: publicKeys.length
+      },
+      message: isValid ? 'Signature is valid' : 'Signature is invalid - no matching public key found'
+    });
     
   } catch (error) {
     console.error('Error verifying signature:', error);

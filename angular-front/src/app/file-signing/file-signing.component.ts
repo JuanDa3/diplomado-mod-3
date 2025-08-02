@@ -42,6 +42,7 @@ export interface SignResponse {
     id: number;
     signatureHash: string;
     signedAt: string;
+    keyName?: string;
   };
 }
 
@@ -53,6 +54,10 @@ export interface VerifyResponse {
     signatureHash: string;
     signedAt: string;
     signerId: number;
+  };
+  verificationDetails?: {
+    verifiedWithKey: string | null;
+    totalKeysChecked: number;
   };
   message: string;
 }
@@ -132,7 +137,8 @@ export class FileSigningComponent implements OnInit {
       next: (response) => {
         this.isSigning = false;
         if (response.success) {
-          alert(`✅ ${response.message}\n\nSignature Hash: ${response.signature.signatureHash}`);
+          const keyInfo = response.signature.keyName ? `\nKey Used: ${response.signature.keyName}` : '';
+          alert(`✅ ${response.message}\n\nSignature Hash: ${response.signature.signatureHash}${keyInfo}`);
           this.privateKey = '';
           this.loadFilesForSigning(); // Refresh to update signed status
         } else {
@@ -176,7 +182,16 @@ export class FileSigningComponent implements OnInit {
       next: (response) => {
         if (response.success) {
           const status = response.isValid ? '✅ VALID' : '❌ INVALID';
-          alert(`${status} - ${response.message}\n\nSigner: ${signature.signerName}\nSignature Hash: ${signature.signatureHash}`);
+          let verificationInfo = `\nSigner: ${signature.signerName}\nSignature Hash: ${signature.signatureHash}`;
+          
+          if (response.verificationDetails) {
+            verificationInfo += `\nKeys Checked: ${response.verificationDetails.totalKeysChecked}`;
+            if (response.verificationDetails.verifiedWithKey) {
+              verificationInfo += `\nVerified With Key: ${response.verificationDetails.verifiedWithKey}`;
+            }
+          }
+          
+          alert(`${status} - ${response.message}${verificationInfo}`);
         } else {
           this.errorMessage = 'Failed to verify signature';
         }
